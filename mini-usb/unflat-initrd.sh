@@ -1,5 +1,7 @@
 #!/bin/bash
+#
+# usage: ./unflat-initrd.sh <initrd.gz>
 
 rm -rf initrd
 mkdir -p initrd && cd initrd
-gzip -dc ../initrd-big.img | cpio -id
+gzip -dc ../"$1" | cpio -id
