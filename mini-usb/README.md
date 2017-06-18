@@ -8,5 +8,5 @@ syslinux testing.img
 mkdir -p usb && mount testing.img usb # Now you can copy vmlinuz and initrd.gz
 ```
 
-To modify the `initrd.img`, use the scripts `unflat-initrd.gz` and
+To modify the `initrd.img`, use the scripts `unflat-initrd.sh` and
 `rebuild-initrd.sh`.
