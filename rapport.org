@@ -1,0 +1,141 @@
+#+OPTIONS: ':nil *:t -:t ::t <:t H:3 \n:nil ^:t arch:headline author:t
+#+OPTIONS: broken-links:nil c:nil creator:nil d:(not "LOGBOOK") date:t e:t
+#+OPTIONS: email:nil f:t inline:t num:t p:nil pri:nil prop:nil stat:t tags:t
+#+OPTIONS: tasks:t tex:t timestamp:t title:t toc:t todo:t |:t
+#+TITLE: Rapport TP thermoIP
+#+DATE: <2017-06-18 dim.>
+#+AUTHOR: hnasr
+#+EMAIL: hnasr@hnasr-X201
+#+LANGUAGE: en
+#+SELECT_TAGS: export
+#+EXCLUDE_TAGS: noexport
+#+CREATOR: Emacs 24.5.1 (Org mode 9.0.8)
+
+* Objectif
+  Fournir une API REST permettant d'intéroger un objet connecté.
+
+* Pré-requis
+  - Une carte Arduino UNO
+  - Un shield Ethernet
+  - Un capteur TMP36 (et/ou d'autres capteurs)
+  - Une clé USB (ou QEMU)
+
+* Steps
+** Step 1 - set up Arduino
+*** Hardware
+    Mettre une image du circuit
+*** the (pseudo-)REST API
+    Mettre le code de l'Arduino
+** Step 2 - build client program
+   Il faut maintenant créer un client qui va requêter l'Arduino pour recupérer
+   les infos des capteurs. Ce programme doit être mis sur une clé USB qui va
+   automatiquement le lancer au démarrage de la clé. 2 étapes:
+   - création du programme
+   - création de la clé
+
+     
+   Pour éviter les dépendances de libraires et d'autres programmes tier (Python
+   ...), j'ai écris le programme client en Go. Go à la particularité de générer
+   ses programmes en binaire, ce qui fait qu'il (le programme) peut être
+   exécuter nativement l'ordinateur (pas besoin de VM comme Java ou Python).
+
+   Voici le résultat de la commande =ldd= de l'exécutable générer par Go:
+   #+BEGIN_EXAMPLE
+    $ ldd mygoapp
+   	linux-vdso.so.1 (0x00007fff5e5d0000)
+	  libpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x00007f75c1cfa000)
+	  libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f75c194f000)
+	  /lib64/ld-linux-x86-64.so.2 (0x000055b9e3e2a000)
+   #+END_EXAMPLE
+
+   Voici le résultat d'un =ldd= sur un simple "Hello World" en C:
+   #+BEGIN_SRC c
+     #include <stdio.h>
+
+     int
+     main(void)
+     {
+       printf("hello\n");
+       return 0;
+     }
+
+     /*
+       $ gcc hello.c
+       $ ldd a.out
+       linux-vdso.so.1 =>  (0x00007fff2598b000)
+       libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f3513f15000)
+       /lib64/ld-linux-x86-64.so.2 (0x0000557f68e08000)
+      ,*/
+   #+END_SRC
+
+   Pas mal hein ? On à donc maintenant la possibilité d'écrire un programme
+   complexe à l'aide d'un langage de haut niveau sans nous soucier des
+   dépendances externes, Cool!
+*** Le programme
+    Le programme est divisé en deux partis:
+    - un client qui va requêter l'Arduino
+    - un serveur qui va fournir une API REST pour tous les autres clients
+
+    #+BEGIN_SRC go
+      // client side
+      type Temperature struct {
+        Value float64
+        Unit string
+      }
+
+      func getTemp() Temperature {
+        resp, err := http.Get("http://192.168.1.177") // @IP de l'Arduino
+        if err != nil {
+          log.Fatal(err)
+        }
+
+        defer resp.Body.Close() // defer = à exécuter avant de quitter la fonction
+
+        temp := Temperature{} // on créer un nouvel object Temperature
+        decoder := json.NewDecoder(resp.Body)
+        err = decoder.Decode(&temp)
+
+        if err != nil {
+          log.Println(err)
+        }
+
+        return temp
+      }
+    #+END_SRC
+
+    #+BEGIN_SRC go
+      // server side
+      // === API REST
+      router := httprouter.New()
+      router.GET("/", indexHandler)
+      router.GET("/temp", tempHandler)
+      router.GET("/lum", lumHandler)
+
+      http.ListenAndServe(":8080", router)
+
+      // Les xxxHandler sont des fonctions qui vont simplement lire le contenue
+      // d'un fichier (infos arduino) et l'envoyer au client.
+    #+END_SRC
+*** La clé usb
+    Pour avoir une clé USB bootable qui lance un programme au démarrage, voici les ingrédients:
+    1. une clé USB
+    2. un initrd (système de fichier)
+    3. un noyau linux qui support l'initrd
+    4. syslinux
+      
+    Vous pouvez prendre l'initrd disponible à cette URL:
+    http://ftp.debian.org/debian/dists/stable/main/installer-amd64/current/images/hd-media/initrd.gz
+
+    Utiliser les scripts =unflat-initrd.sh= et =rebuild-initrd.sh= pour
+    manipuler le contenue de l'initrd. 
+
+    Pour pouvoir tester la procédure, voici une série de commande pour booter un
+    linux avec QEMU:
+    #+BEGIN_SRC sh
+    qemu-img create -f raw testing.img 10M
+    mkdosfs testing.img
+    syslinux testing.img
+    mkdir -p usb && mount testing.img usb
+    # Now you can copy vmlinuz and initrd.gz
+    cp vmlinuz initrd.gz usb/
+    #+END_SRC
